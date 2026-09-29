@@ -1,0 +1,112 @@
+//@version=5
+strategy("Multi-Signal Trading Indicator", overlay=true, margin_long=100, margin_short=100)
+
+// ======== PARAMETRE AYARLARI ========
+rsiLength = input(14, title="RSI Length")
+rsiOverbought = input(70, title="RSI Overbought Level")
+rsiOversold = input(30, title="RSI Oversold Level")
+
+macdFastLength = input(12, title="MACD Fast Length")
+macdSlowLength = input(26, title="MACD Slow Length")
+macdSignalLength = input(9, title="MACD Signal Length")
+
+bbLength = input(20, title="Bollinger Bands Length")
+bbStdDev = input(2.0, title="Bollinger Bands StdDev")
+
+stochLength = input(14, title="Stochastic Length")
+stochKSmooth = input(3, title="Stochastic K Smooth")
+stochDSmooth = input(3, title="Stochastic D Smooth")
+
+smaShort = input(20, title="SMA Short Length")
+smaLong = input(50, title="SMA Long Length")
+
+// ======== ZAMAN FİLTRESİ ========
+timeFilter = input("1H", title="Minimum Timeframe")
+
+// ======== İNDİKATÖRLER HESAPLAMA ========
+
+// RSI
+rsi = ta.rsi(close, rsiLength)
+
+// MACD
+[macdLine, signalLine, macdHist] = ta.macd(close, macdFastLength, macdSlowLength, macdSignalLength)
+
+// Bollinger Bands
+[bbMiddle, bbUpper, bbLower] = ta.bb(close, bbLength, bbStdDev)
+
+// Stochastic
+[stochK, stochD] = ta.stoch(close, high, low, stochLength)
+stochK := ta.sma(stochK, stochKSmooth)
+stochD := ta.sma(stochD, stochDSmooth)
+
+// Simple Moving Averages
+sma20 = ta.sma(close, smaShort)
+sma50 = ta.sma(close, smaLong)
+
+// ATR (Risk Management için)
+atr = ta.atr(14)
+
+// ======== AL SİNYALİ KOŞULLARI (DİPTE ALMAK) ========
+buyCondition1 = rsi < rsiOversold                           // RSI aşırı satılmış
+buyCondition2 = macdHist > 0 and macdHist[1] < 0           // MACD histogram kesişimi (pozitif)
+buyCondition3 = close < bbLower                             // Fiyat Bollinger Bands alt bandının altında
+buyCondition4 = stochK < 20 and stochK > stochD            // Stochastic alt ve yükselen
+buyCondition5 = close > sma20 and sma20 > sma50             // Trend yukarıda (20>50)
+
+// AL: En az 3 sinyal eşleşmesi gerekir
+buySignal = (buyCondition1 ? 1 : 0) + (buyCondition2 ? 1 : 0) + (buyCondition3 ? 1 : 0) + 
+            (buyCondition4 ? 1 : 0) + (buyCondition5 ? 1 : 0) >= 3
+
+// ======== SAT SİNYALİ KOŞULLARI (TEPEDE SATMAK) ========
+sellCondition1 = rsi > rsiOverbought                        // RSI aşırı alınmış
+sellCondition2 = macdHist < 0 and macdHist[1] > 0          // MACD histogram kesişimi (negatif)
+sellCondition3 = close > bbUpper                            // Fiyat Bollinger Bands üst bandının üstünde
+sellCondition4 = stochK > 80 and stochK < stochD           // Stochastic üst ve düşen
+sellCondition5 = close < sma20 and sma20 < sma50            // Trend aşağıda (20<50)
+
+// SAT: En az 3 sinyal eşleşmesi gerekir
+sellSignal = (sellCondition1 ? 1 : 0) + (sellCondition2 ? 1 : 0) + (sellCondition3 ? 1 : 0) + 
+             (sellCondition4 ? 1 : 0) + (sellCondition5 ? 1 : 0) >= 3
+
+// ======== STOP LOSS VE TAKE PROFIT ========
+stopLossPercent = input(2.0, title="Stop Loss %")
+takeProfitPercent = input(5.0, title="Take Profit %")
+
+// ======== STRATEJİ İŞLEMLERİ ========
+if buySignal
+    strategy.entry("BUY", strategy.long)
+    strategy.exit("EXIT_BUY", "BUY", stop=close*(1-stopLossPercent/100), limit=close*(1+takeProfitPercent/100))
+
+if sellSignal
+    strategy.entry("SELL", strategy.short)
+    strategy.exit("EXIT_SELL", "SELL", stop=close*(1+stopLossPercent/100), limit=close*(1-takeProfitPercent/100))
+
+// ======== VİZÜAL İŞARETLEMELER ========
+
+// AL Sinyali - Yeşil Üçgen
+plotshape(buySignal, title="Buy Signal", location=location.belowbar, color=color.green, 
+          style=shape.triangleup, size=size.large, text="BUY")
+
+// SAT Sinyali - Kırmızı Üçgen
+plotshape(sellSignal, title="Sell Signal", location=location.abovebar, color=color.red, 
+          style=shape.triangledown, size=size.large, text="SELL")
+
+// Bollinger Bands Çizimi
+plot(bbUpper, title="BB Upper", color=color.orange, linewidth=1)
+plot(bbMiddle, title="BB Middle", color=color.gray, linewidth=1)
+plot(bbLower, title="BB Lower", color=color.orange, linewidth=1)
+
+// Hareketli Ortalamalar
+plot(sma20, title="SMA 20", color=color.blue, linewidth=2)
+plot(sma50, title="SMA 50", color=color.purple, linewidth=2)
+
+// RSI Alt Panelinde (açıklamalar için)
+// hline(rsiOverbought, "RSI Overbought", color=color.red, linestyle=hline.dashed)
+// hline(rsiOversold, "RSI Oversold", color=color.green, linestyle=hline.dashed)
+
+// ======== UYARILAR ========
+alertmessage_buy = "🟢 AL SİNYALİ: Diple satın alma fırsatı!"
+alertmessage_sell = "🔴 SAT SİNYALİ: Tepede satış fırsatı!"
+
+alert(buySignal ? alertmessage_buy : na, alert.freq_once_per_bar_close)
+alert(sellSignal ? alertmessage_sell : na, alert.freq_once_per_bar_close)
